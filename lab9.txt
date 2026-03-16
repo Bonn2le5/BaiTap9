@@ -1,0 +1,517 @@
+Phiếu bài tập 1
+CREATE TABLE hang (
+    mahang   VARCHAR2(10)  PRIMARY KEY,
+    tenhang  VARCHAR2(100) NOT NULL,
+    soluong  NUMBER(10)   DEFAULT 0 CHECK (soluong >= 0),
+    giaban   NUMBER(15,2) DEFAULT 0
+);
+
+
+CREATE TABLE hoadon (
+    mahd       VARCHAR2(10)  PRIMARY KEY,
+    mahang     VARCHAR2(10)  NOT NULL,
+    soluongban NUMBER(10)   CHECK (soluongban > 0),
+    ngayban    DATE          DEFAULT SYSDATE
+);
+
+INSERT INTO hang(mahang, tenhang, soluong, giaban) VALUES ('H01', 'Laptop Dell',    50, 18000000);
+INSERT INTO hang(mahang, tenhang, soluong, giaban) VALUES ('H02', 'Chuot Logitech', 100,   350000); 
+INSERT INTO hang(mahang, tenhang, soluong, giaban) VALUES ('H03', 'Ban Phim Co',    30,   750000);
+INSERT INTO hang(mahang, tenhang, soluong, giaban) VALUES ('H04', 'Man Hinh 24"',   20,  3200000);
+
+COMMIT;
+
+SELECT * FROM hang;
+
+
+
+CREATE OR REPLACE TRIGGER trg_insert_hoadon
+BEFORE INSERT ON hoadon
+FOR EACH ROW
+DECLARE
+    v_soluong_ton  hang.soluong%TYPE;
+    v_dem          NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO v_dem
+    FROM   hang
+    WHERE  mahang = :NEW.mahang;
+
+    IF v_dem = 0 THEN
+        RAISE_APPLICATION_ERROR(-20001,
+            'Loi: Mahang [' || :NEW.mahang ||'] khong ton tai trong bang HANG.');
+    END IF;
+    SELECT soluong INTO v_soluong_ton
+    FROM   hang
+    WHERE  mahang = :NEW.mahang;
+    IF :NEW.soluongban > v_soluong_ton THEN
+        RAISE_APPLICATION_ERROR(-20002,
+            'Loi: So luong ban (' || :NEW.soluongban ||
+            ') vuot ton kho hien tai (' || v_soluong_ton ||') .');
+    END IF;
+    UPDATE hang
+    SET    soluong = soluong - :NEW.soluongban
+    WHERE  mahang  = :NEW.mahang;
+END trg_insert_hoadon;
+/
+--Test
+INSERT INTO hoadon VALUES ('HD01', 'H01', 3, SYSDATE);
+INSERT INTO hoadon VALUES ('HD02', 'H02', 10, SYSDATE);
+INSERT INTO hoadon VALUES ('HD03', 'H03', 5, SYSDATE);
+INSERT INTO hoadon VALUES ('HD04', 'H99', 1, SYSDATE);
+INSERT INTO hoadon VALUES ('HD05', 'H04', 50, SYSDATE);
+COMMIT;
+
+
+CREATE OR REPLACE TRIGGER trg_delete_hoadon
+AFTER DELETE ON hoadon
+FOR EACH ROW
+BEGIN
+    UPDATE hang
+    SET    soluong = soluong + :OLD.soluongban
+    WHERE  mahang  = :OLD.mahang;
+END trg_delete_hoadon;
+/
+
+SELECT mahang, soluong FROM hang WHERE mahang IN ('H01', 'H02');
+DELETE FROM hoadon WHERE mahd = 'HD01';
+DELETE FROM hoadon WHERE mahd = 'HD02';
+
+COMMIT;
+
+
+CREATE OR REPLACE TRIGGER trg_update_hoadon
+BEFORE UPDATE OF soluongban ON hoadon
+FOR EACH ROW
+DECLARE
+    v_soluong_ton  hang.soluong%TYPE;
+    v_chenh_lech   NUMBER;
+BEGIN
+    v_chenh_lech := :NEW.soluongban - :OLD.soluongban;
+
+    IF v_chenh_lech != 0 THEN        
+        IF v_chenh_lech > 0 THEN
+            SELECT soluong INTO v_soluong_ton
+            FROM   hang
+            WHERE  mahang = :NEW.mahang;
+
+            IF v_chenh_lech > v_soluong_ton THEN
+                RAISE_APPLICATION_ERROR(-20003,
+                'Loi: Khong du ton kho. Can them: ' || v_chenh_lech ||
+                    ', Con lai: ' || v_soluong_ton);
+            END IF;
+        END IF;
+UPDATE hang
+        SET    soluong = soluong - v_chenh_lech
+        WHERE  mahang  = :NEW.mahang;
+    END IF;
+END trg_update_hoadon;
+/
+
+INSERT INTO hoadon VALUES ('HD01', 'H01', 3,  SYSDATE); -- H01: 50→47
+INSERT INTO hoadon VALUES ('HD02', 'H02', 10, SYSDATE); -- H02: 100→90
+COMMIT;
+
+
+Phiếu bài tập 2
+CREATE TABLE mathang (
+    mahang  VARCHAR2(5)   CONSTRAINT pk_mathang PRIMARY KEY,
+    tenhang VARCHAR2(50)  NOT NULL,
+    soluong NUMBER(10)
+);
+
+CREATE TABLE nhatkybanhang (
+    stt      NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    ngay     DATE,
+    nguoimua VARCHAR2(50),
+    mahang   VARCHAR2(5)   REFERENCES mathang(mahang),
+    soluong  NUMBER(10),
+    giaban   NUMBER(15,2)
+);
+
+INSERT INTO mathang VALUES ('1', 'Hang A', 100);
+INSERT INTO mathang VALUES ('2', 'Hang B', 200);
+INSERT INTO mathang VALUES ('3', 'Hang C', 150);
+COMMIT;
+
+CREATE OR REPLACE TRIGGER trg_nhatkybanhang_insert
+AFTER INSERT ON nhatkybanhang
+FOR EACH ROW
+BEGIN
+    UPDATE mathang
+    SET    soluong = soluong - :NEW.soluong
+    WHERE  mahang  = :NEW.mahang;
+END trg_nhatkybanhang_insert;
+/
+-- Test
+INSERT INTO nhatkybanhang(ngay, nguoimua, mahang, soluong, giaban)
+VALUES (SYSDATE, 'An', '1', 10, 50000);
+COMMIT;
+SELECT * FROM mathang;
+SELECT * FROM nhatkybanhang;
+
+CREATE OR REPLACE TRIGGER trg_nhatkybanhang_update_soluong
+BEFORE UPDATE OF soluong ON nhatkybanhang
+FOR EACH ROW
+BEGIN
+    UPDATE mathang
+    SET    soluong = soluong - (:NEW.soluong - :OLD.soluong)
+    WHERE  mahang  = :NEW.mahang;
+END trg_nhatkybanhang_update_soluong;
+/
+-- Test 
+UPDATE nhatkybanhang SET soluong = 15 WHERE stt = 1;
+COMMIT;
+SELECT * FROM mathang;
+
+
+
+CREATE OR REPLACE TRIGGER trg_nhatkybanhang_insert_check
+BEFORE INSERT ON nhatkybanhang
+FOR EACH ROW
+DECLARE
+    v_ton  mathang.soluong%TYPE;
+    v_dem  NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO v_dem
+    FROM   mathang WHERE mahang = :NEW.mahang;
+
+    IF v_dem = 0 THEN
+        RAISE_APPLICATION_ERROR(-20001,
+            'Loi: Mahang [' || :NEW.mahang ||'] khong ton tai.');
+    END IF;
+
+    SELECT soluong INTO v_ton
+    FROM   mathang WHERE mahang = :NEW.mahang;
+
+    IF :NEW.soluong > v_ton THEN
+        RAISE_APPLICATION_ERROR(-20002,
+            'Loi: So luong ban (' || :NEW.soluong ||
+            ') vuot ton kho hien tai (' || v_ton ||') .');
+    END IF;
+    UPDATE mathang
+    SET    soluong = soluong - :NEW.soluong
+    WHERE  mahang  = :NEW.mahang;
+END trg_nhatkybanhang_insert_check;
+/
+--Test 
+INSERT INTO nhatkybanhang(ngay, nguoimua, mahang, soluong, giaban)
+VALUES (SYSDATE, 'Binh', '2', 20, 80000);
+COMMIT;
+
+
+CREATE OR REPLACE PACKAGE pkg_nkbh_state AS
+    g_row_count NUMBER := 0;
+END pkg_nkbh_state;
+/
+
+CREATE OR REPLACE TRIGGER trg_nkbh_update_compound
+FOR UPDATE ON nhatkybanhang
+COMPOUND TRIGGER
+    BEFORE STATEMENT IS
+    BEGIN
+        pkg_nkbh_state.g_row_count := 0;
+    END BEFORE STATEMENT;
+    BEFORE EACH ROW IS
+    BEGIN
+        pkg_nkbh_state.g_row_count := pkg_nkbh_state.g_row_count + 1;
+        IF pkg_nkbh_state.g_row_count > 1 THEN
+            RAISE_APPLICATION_ERROR(-20004,
+                'Loi: Chi duoc UPDATE toi da 1 ban ghi mot lan.');
+        END IF;
+        UPDATE mathang
+        SET    soluong = soluong - (:NEW.soluong - :OLD.soluong)
+        WHERE  mahang  = :NEW.mahang;
+    END BEFORE EACH ROW;
+
+END trg_nkbh_update_compound;
+/
+--Test 
+UPDATE nhatkybanhang SET soluong = 8 WHERE stt = 1;
+COMMIT;
+
+-- e) Compound Trigger DELETE – Kiểm soát chỉ 1 dòng
+CREATE OR REPLACE PACKAGE pkg_nkbh_del AS
+    g_row_count NUMBER := 0;
+END pkg_nkbh_del;
+/
+
+CREATE OR REPLACE TRIGGER trg_nkbh_delete_compound
+FOR DELETE ON nhatkybanhang
+COMPOUND TRIGGER
+
+    BEFORE STATEMENT IS
+    BEGIN
+        pkg_nkbh_del.g_row_count := 0;
+    END BEFORE STATEMENT;
+
+    BEFORE EACH ROW IS
+    BEGIN
+        pkg_nkbh_del.g_row_count := pkg_nkbh_del.g_row_count + 1;
+        IF pkg_nkbh_del.g_row_count > 1 THEN
+            RAISE_APPLICATION_ERROR(-20005,
+                'Loi: Chi duoc DELETE toi da 1 ban ghi mot lan.');
+        END IF;
+    
+        UPDATE mathang
+        SET    soluong = soluong + :OLD.soluong
+        WHERE  mahang  = :OLD.mahang;
+    END BEFORE EACH ROW;
+
+END trg_nkbh_delete_compound;
+/
+-- Test 
+DELETE FROM nhatkybanhang WHERE stt = 1;
+COMMIT;
+
+-- f. Trigger UPDATE nâng cao – Kiểm tra nhiều điều kiện
+CREATE OR REPLACE PACKAGE pkg_nkbh_upd2 AS
+    g_row_count NUMBER := 0;
+END pkg_nkbh_upd2;
+/
+
+CREATE OR REPLACE TRIGGER trg_nkbh_update_nangcao
+FOR UPDATE ON nhatkybanhang
+COMPOUND TRIGGER
+
+    BEFORE STATEMENT IS
+    BEGIN
+        pkg_nkbh_upd2.g_row_count := 0;
+    END BEFORE STATEMENT;
+
+    BEFORE EACH ROW IS
+        v_ton  mathang.soluong%TYPE;
+    BEGIN
+        pkg_nkbh_upd2.g_row_count := pkg_nkbh_upd2.g_row_count + 1;
+        IF pkg_nkbh_upd2.g_row_count > 1 THEN
+            RAISE_APPLICATION_ERROR(-20006,
+                'Loi: Chi duoc UPDATE 1 ban ghi.');
+        END IF;
+        SELECT soluong INTO v_ton
+        FROM   mathang WHERE mahang = :NEW.mahang;
+        IF :NEW.soluong < v_ton THEN
+            RAISE_APPLICATION_ERROR(-20007,
+                'Loi: So luong cap nhat (' || :NEW.soluong ||
+                ') nho hon ton kho hien tai (' || v_ton ||') .');
+        END IF;
+        IF :NEW.soluong = v_ton THEN
+            RAISE_APPLICATION_ERROR(-20008,
+                'Thong bao: So luong moi bang ton kho, khong can cap nhat.');
+        END IF;
+        UPDATE mathang
+        SET    soluong = soluong - (:NEW.soluong - :OLD.soluong)
+        WHERE  mahang  = :NEW.mahang;
+    END BEFORE EACH ROW;
+
+END trg_nkbh_update_nangcao;
+/
+--test
+UPDATE nhatkybanhang SET soluong = 30;
+UPDATE nhatkybanhang SET soluong = 250 WHERE stt = 2;
+COMMIT;
+
+-- g. Thủ tục xóa MATHANG (tác động 2 bảng)
+CREATE OR REPLACE PROCEDURE proc_xoa_mathang (
+    p_mahang IN mathang.mahang%TYPE
+) AS
+    v_dem NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO v_dem
+    FROM   mathang
+    WHERE  mahang = p_mahang;
+
+    IF v_dem = 0 THEN
+        DBMS_OUTPUT.PUT_LINE('Thong bao: Mahang [' || p_mahang ||
+                             '] khong ton tai trong he thong.');
+        RETURN;
+    END IF;
+
+    DELETE FROM nhatkybanhang WHERE mahang = p_mahang;
+    DBMS_OUTPUT.PUT_LINE('Da xoa ' || SQL%ROWCOUNT ||
+                         ' ban ghi trong NHATKYBANHANG.');
+
+ 
+    DELETE FROM mathang WHERE mahang = p_mahang;
+    DBMS_OUTPUT.PUT_LINE('Da xoa mahang [' || p_mahang ||
+                         '] khoi bang MATHANG.');
+    COMMIT;
+
+EXCEPTION
+    WHEN OTHERS THEN
+        ROLLBACK;
+        DBMS_OUTPUT.PUT_LINE('Loi: ' || SQLERRM);
+END proc_xoa_mathang;
+/
+
+--test
+EXEC proc_xoa_mathang('3');
+
+-- h. Hàm tính tổng tiền theo tên hàng
+CREATE OR REPLACE FUNCTION fn_tongtien (
+    p_tenhang IN mathang.tenhang%TYPE
+) RETURN NUMBER AS
+    v_tong NUMBER := 0;
+BEGIN
+    SELECT NVL(SUM(nk.soluong * nk.giaban), 0)
+    INTO   v_tong
+    FROM   nhatkybanhang nk
+    JOIN   mathang       mh ON nk.mahang = mh.mahang
+    WHERE  mh.tenhang = p_tenhang;
+
+    RETURN v_tong;
+END fn_tongtien;
+/
+
+--test
+INSERT INTO nhatkybanhang(ngay, nguoimua, mahang, soluong, giaban)
+VALUES (SYSDATE, 'An',   '1', 5,  50000);  -- Hang A: 5×50000 = 250,000
+INSERT INTO nhatkybanhang(ngay, nguoimua, mahang, soluong, giaban)
+VALUES (SYSDATE, 'Binh', '1', 3,  55000);  -- Hang A: 3×55000 = 165,000
+INSERT INTO nhatkybanhang(ngay, nguoimua, mahang, soluong, giaban)
+VALUES (SYSDATE, 'Cuong','2', 10, 80000);  -- Hang B: 10×80000 = 800,000
+COMMIT;
+SELECT fn_tongtien('Hang A') AS tong_tien_hang_a FROM DUAL;
+SELECT fn_tongtien('Hang B') AS tong_tien_hang_b FROM DUAL;
+
+Phiếu bài tập 3
+CREATE TABLE lophoc (
+    malop       VARCHAR2(10)  PRIMARY KEY,
+    tenlop      VARCHAR2(100) NOT NULL,
+    sisotoida   NUMBER(5)    DEFAULT 30,
+    sisohientai NUMBER(5)    DEFAULT 0
+);
+
+CREATE TABLE dangky (
+    madk      VARCHAR2(10)  PRIMARY KEY,
+    masv      VARCHAR2(10)  NOT NULL,
+    malop     VARCHAR2(10)  REFERENCES lophoc(malop),
+    ngaydangky DATE         DEFAULT SYSDATE
+);
+
+INSERT INTO lophoc VALUES ('L01', 'Lap Trinh Java',    3,  2);
+INSERT INTO lophoc VALUES ('L02', 'Co So Du Lieu',     30, 15);
+INSERT INTO lophoc VALUES ('L03', 'Mang May Tinh',     2,  2); 
+INSERT INTO lophoc VALUES ('L04', 'Tri Tue Nhan Tao',  25, 10);
+INSERT INTO dangky VALUES ('DK01', 'SV001', 'L01', SYSDATE);
+INSERT INTO dangky VALUES ('DK02', 'SV002', 'L01', SYSDATE);
+INSERT INTO dangky VALUES ('DK03', 'SV001', 'L02', SYSDATE);
+COMMIT;
+
+-- a Trigger INSERT trên bảng DANGKY
+CREATE OR REPLACE TRIGGER trg_insert_dangky
+BEFORE INSERT ON dangky
+FOR EACH ROW
+DECLARE
+    v_dem_lop   NUMBER;
+    v_dem_sv    NUMBER;
+    v_sotoida   lophoc.sisotoida%TYPE;
+    v_sohientai lophoc.sisohientai%TYPE;
+BEGIN
+    SELECT COUNT(*) INTO v_dem_lop
+    FROM   lophoc
+    WHERE  malop = :NEW.malop;
+
+    IF v_dem_lop = 0 THEN
+        RAISE_APPLICATION_ERROR(-20001,
+            'Loi: Malop [' || :NEW.malop ||'] khong ton tai trong bang LOPHOC.');
+    END IF;
+    SELECT COUNT(*) INTO v_dem_sv
+    FROM   dangky
+    WHERE  masv  = :NEW.masv
+    AND    malop = :NEW.malop;
+
+    IF v_dem_sv > 0 THEN
+        RAISE_APPLICATION_ERROR(-20002,
+            'Loi: Sinh vien [' || :NEW.masv ||
+            '] da dang ky lop [' || :NEW.malop ||'] roi.');
+    END IF;
+    SELECT sisotoida, sisohientai
+    INTO   v_sotoida, v_sohientai
+    FROM   lophoc
+    WHERE  malop = :NEW.malop;
+
+    IF v_sohientai >= v_sotoida THEN
+        RAISE_APPLICATION_ERROR(-20003,
+            'Loi: Lop [' || :NEW.malop ||
+            '] da day (' || v_sohientai ||'/' || v_sotoida ||') .');
+    END IF;
+    UPDATE lophoc
+    SET    sisohientai = sisohientai + 1
+    WHERE  malop = :NEW.malop;
+END trg_insert_dangky;
+/
+
+INSERT INTO dangky VALUES ('DK04', 'SV003', 'L01', SYSDATE);
+INSERT INTO dangky VALUES ('DK05', 'SV004', 'L99', SYSDATE);
+COMMIT;
+
+-- b Trigger DELETE trên bảng DANGKY
+CREATE OR REPLACE TRIGGER trg_delete_dangky
+AFTER DELETE ON dangky
+FOR EACH ROW
+BEGIN
+    UPDATE lophoc
+    SET    sisohientai = sisohientai - 1
+    WHERE  malop = :OLD.malop;
+END trg_delete_dangky;
+/
+--Test 
+SELECT malop, sisohientai FROM lophoc WHERE malop = 'L01';
+DELETE FROM dangky WHERE madk = 'DK04';
+COMMIT;
+DELETE FROM dangky WHERE madk = 'DK01';
+COMMIT;
+
+
+-- Trigger UPDATE trên bảng DANGKY
+CREATE OR REPLACE TRIGGER trg_update_dangky
+BEFORE UPDATE OF malop ON dangky
+FOR EACH ROW
+DECLARE
+    v_dem_lop   NUMBER;
+    v_dem_sv    NUMBER;
+    v_sotoida   lophoc.sisotoida%TYPE;
+    v_sohientai lophoc.sisohientai%TYPE;
+BEGIN
+    IF :NEW.malop = :OLD.malop THEN
+        RETURN;
+    END IF;
+    SELECT COUNT(*) INTO v_dem_lop
+    FROM   lophoc
+    WHERE  malop = :NEW.malop;
+
+    IF v_dem_lop = 0 THEN
+        RAISE_APPLICATION_ERROR(-20004,
+            'Loi: Malop moi [' || :NEW.malop ||'] khong ton tai.');
+    END IF;
+    SELECT COUNT(*) INTO v_dem_sv
+    FROM   dangky
+    WHERE  masv  = :NEW.masv
+    AND    malop = :NEW.malop;
+
+    IF v_dem_sv > 0 THEN
+        RAISE_APPLICATION_ERROR(-20005,
+            'Loi: Sinh vien [' || :NEW.masv ||
+            '] da ton tai trong lop moi [' || :NEW.malop ||'] .');
+    END IF;
+    SELECT sisotoida, sisohientai
+    INTO   v_sotoida, v_sohientai
+    FROM   lophoc
+    WHERE  malop = :NEW.malop;
+
+    IF v_sohientai >= v_sotoida THEN
+        RAISE_APPLICATION_ERROR(-20006,
+            'Loi: Lop moi [' || :NEW.malop ||
+            '] da day (' || v_sohientai ||'/' || v_sotoida ||') .');
+    END IF;
+    UPDATE lophoc
+    SET    sisohientai = sisohientai - 1
+    WHERE  malop = :OLD.malop;
+
+    UPDATE lophoc
+    SET    sisohientai = sisohientai + 1
+    WHERE  malop = :NEW.malop;
+END trg_update_dangky;
+/
+--test  
+UPDATE dangky SET malop = 'L04' WHERE madk = 'DK02';
+COMMIT;
